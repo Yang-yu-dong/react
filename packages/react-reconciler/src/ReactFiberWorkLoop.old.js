@@ -79,7 +79,7 @@ import {
 } from './SchedulingProfiler';
 
 // The scheduler is imported here *only* to detect whether it's been mocked
-import * as Scheduler from 'scheduler';
+import * as Scheduler from '../../scheduler/src/forks/SchedulerMock';
 
 import {
   resetAfterCommit,
