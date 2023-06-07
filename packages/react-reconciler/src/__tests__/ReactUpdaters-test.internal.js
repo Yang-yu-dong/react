@@ -12,12 +12,13 @@
 let React;
 let ReactFeatureFlags;
 let ReactDOM;
-let ReactTestUtils;
+let ReactDOMClient;
 let Scheduler;
 let mockDevToolsHook;
 let allSchedulerTags;
 let allSchedulerTypes;
 let onCommitRootShouldYield;
+let act;
 
 describe('updaters', () => {
   beforeEach(() => {
@@ -51,6 +52,32 @@ describe('updaters', () => {
       onCommitUnmount: jest.fn(() => {}),
       onPostCommitRoot: jest.fn(() => {}),
       onScheduleRoot: jest.fn(() => {}),
+
+      // Profiling APIs
+      markCommitStarted: jest.fn(() => {}),
+      markCommitStopped: jest.fn(() => {}),
+      markComponentRenderStarted: jest.fn(() => {}),
+      markComponentRenderStopped: jest.fn(() => {}),
+      markComponentPassiveEffectMountStarted: jest.fn(() => {}),
+      markComponentPassiveEffectMountStopped: jest.fn(() => {}),
+      markComponentPassiveEffectUnmountStarted: jest.fn(() => {}),
+      markComponentPassiveEffectUnmountStopped: jest.fn(() => {}),
+      markComponentLayoutEffectMountStarted: jest.fn(() => {}),
+      markComponentLayoutEffectMountStopped: jest.fn(() => {}),
+      markComponentLayoutEffectUnmountStarted: jest.fn(() => {}),
+      markComponentLayoutEffectUnmountStopped: jest.fn(() => {}),
+      markComponentErrored: jest.fn(() => {}),
+      markComponentSuspended: jest.fn(() => {}),
+      markLayoutEffectsStarted: jest.fn(() => {}),
+      markLayoutEffectsStopped: jest.fn(() => {}),
+      markPassiveEffectsStarted: jest.fn(() => {}),
+      markPassiveEffectsStopped: jest.fn(() => {}),
+      markRenderStarted: jest.fn(() => {}),
+      markRenderYielded: jest.fn(() => {}),
+      markRenderStopped: jest.fn(() => {}),
+      markRenderScheduled: jest.fn(() => {}),
+      markForceUpdateScheduled: jest.fn(() => {}),
+      markStateUpdateScheduled: jest.fn(() => {}),
     };
 
     jest.mock(
@@ -64,8 +91,10 @@ describe('updaters', () => {
 
     React = require('react');
     ReactDOM = require('react-dom');
-    ReactTestUtils = require('react-dom/test-utils');
+    ReactDOMClient = require('react-dom/client');
     Scheduler = require('scheduler');
+
+    act = require('jest-react').act;
   });
 
   it('should report the (host) root as the scheduler for root-level render', async () => {
@@ -75,12 +104,12 @@ describe('updaters', () => {
     const Child = () => null;
     const container = document.createElement('div');
 
-    await ReactTestUtils.act(async () => {
+    await act(async () => {
       ReactDOM.render(<Parent />, container);
     });
     expect(allSchedulerTags).toEqual([[HostRoot]]);
 
-    await ReactTestUtils.act(async () => {
+    await act(async () => {
       ReactDOM.render(<Parent />, container);
     });
     expect(allSchedulerTags).toEqual([[HostRoot], [HostRoot]]);
@@ -108,19 +137,19 @@ describe('updaters', () => {
     };
     const Child = () => null;
 
-    await ReactTestUtils.act(async () => {
+    await act(async () => {
       ReactDOM.render(<Parent />, document.createElement('div'));
     });
     expect(scheduleForA).not.toBeNull();
     expect(scheduleForB).not.toBeNull();
     expect(allSchedulerTypes).toEqual([[null]]);
 
-    await ReactTestUtils.act(async () => {
+    await act(async () => {
       scheduleForA();
     });
     expect(allSchedulerTypes).toEqual([[null], [SchedulingComponentA]]);
 
-    await ReactTestUtils.act(async () => {
+    await act(async () => {
       scheduleForB();
     });
     expect(allSchedulerTypes).toEqual([
@@ -141,19 +170,18 @@ describe('updaters', () => {
     }
     const Child = () => null;
     let instance;
-    await ReactTestUtils.act(async () => {
+    await act(async () => {
       ReactDOM.render(<Parent />, document.createElement('div'));
     });
     expect(allSchedulerTypes).toEqual([[null]]);
 
     expect(instance).not.toBeNull();
-    await ReactTestUtils.act(async () => {
+    await act(async () => {
       instance.setState({});
     });
     expect(allSchedulerTypes).toEqual([[null], [SchedulingComponent]]);
   });
 
-  // @gate experimental
   it('should cover cascading updates', async () => {
     let triggerActiveCascade = null;
     let triggerPassiveCascade = null;
@@ -183,8 +211,8 @@ describe('updaters', () => {
       return count;
     };
 
-    const root = ReactDOM.unstable_createRoot(document.createElement('div'));
-    await ReactTestUtils.act(async () => {
+    const root = ReactDOMClient.createRoot(document.createElement('div'));
+    await act(async () => {
       root.render(<Parent />);
       expect(Scheduler).toFlushAndYieldThrough([
         'CascadingChild 0',
@@ -195,7 +223,7 @@ describe('updaters', () => {
     expect(triggerPassiveCascade).not.toBeNull();
     expect(allSchedulerTypes).toEqual([[null]]);
 
-    await ReactTestUtils.act(async () => {
+    await act(async () => {
       triggerActiveCascade();
       expect(Scheduler).toFlushAndYieldThrough([
         'CascadingChild 0',
@@ -210,7 +238,7 @@ describe('updaters', () => {
       [CascadingChild],
     ]);
 
-    await ReactTestUtils.act(async () => {
+    await act(async () => {
       triggerPassiveCascade();
       expect(Scheduler).toFlushAndYieldThrough([
         'CascadingChild 1',
@@ -265,21 +293,21 @@ describe('updaters', () => {
       }
     };
 
-    await ReactTestUtils.act(async () => {
+    await act(async () => {
       ReactDOM.render(<Parent />, document.createElement('div'));
       expect(Scheduler).toHaveYielded(['onCommitRoot']);
     });
     expect(setShouldSuspend).not.toBeNull();
     expect(allSchedulerTypes).toEqual([[null]]);
 
-    await ReactTestUtils.act(async () => {
+    await act(async () => {
       setShouldSuspend(true);
     });
     expect(Scheduler).toHaveYielded(['onCommitRoot']);
     expect(allSchedulerTypes).toEqual([[null], [Suspender]]);
 
     expect(resolver).not.toBeNull();
-    await ReactTestUtils.act(() => {
+    await act(() => {
       resolver('abc');
       return promise;
     });
@@ -292,7 +320,6 @@ describe('updaters', () => {
     done();
   });
 
-  // @gate experimental
   it('should cover error handling', async () => {
     let triggerError = null;
 
@@ -329,8 +356,8 @@ describe('updaters', () => {
       throw new Error('Hello');
     };
 
-    const root = ReactDOM.unstable_createRoot(document.createElement('div'));
-    await ReactTestUtils.act(async () => {
+    const root = ReactDOMClient.createRoot(document.createElement('div'));
+    await act(async () => {
       root.render(<Parent shouldError={false} />);
     });
     expect(Scheduler).toHaveYielded(['initial', 'onCommitRoot']);
@@ -339,7 +366,7 @@ describe('updaters', () => {
     allSchedulerTypes.splice(0);
     onCommitRootShouldYield = true;
 
-    await ReactTestUtils.act(async () => {
+    await act(async () => {
       triggerError();
     });
     expect(Scheduler).toHaveYielded(['onCommitRoot', 'error', 'onCommitRoot']);
@@ -349,7 +376,6 @@ describe('updaters', () => {
     Scheduler.unstable_flushAll();
   });
 
-  // @gate experimental
   it('should distinguish between updaters in the case of interleaved work', async () => {
     const {
       FunctionComponent,
@@ -368,7 +394,7 @@ describe('updaters', () => {
     const LowPriorityUpdater = () => {
       const [count, setCount] = React.useState(0);
       triggerLowPriorityUpdate = () => {
-        React.unstable_startTransition(() => {
+        React.startTransition(() => {
           setCount(prevCount => prevCount + 1);
         });
       };
@@ -380,7 +406,7 @@ describe('updaters', () => {
       return null;
     };
 
-    const root = ReactDOM.unstable_createRoot(document.createElement('div'));
+    const root = ReactDOMClient.createRoot(document.createElement('div'));
     root.render(
       <React.Fragment>
         <SyncPriorityUpdater />
@@ -401,7 +427,7 @@ describe('updaters', () => {
     expect(allSchedulerTags).toEqual([[HostRoot]]);
 
     // Render a partial update, but don't finish.
-    ReactTestUtils.act(() => {
+    act(() => {
       triggerLowPriorityUpdate();
       expect(Scheduler).toFlushAndYieldThrough(['LowPriorityUpdater 1']);
       expect(allSchedulerTags).toEqual([[HostRoot]]);

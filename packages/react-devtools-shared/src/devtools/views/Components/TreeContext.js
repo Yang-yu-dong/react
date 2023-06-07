@@ -34,7 +34,7 @@ import {
   useMemo,
   useReducer,
   useRef,
-  unstable_startTransition as startTransition,
+  startTransition,
 } from 'react';
 import {createRegExp} from '../utils';
 import {BridgeContext, StoreContext} from '../context';
@@ -377,11 +377,10 @@ function reduceTreeState(store: Store, state: State, action: Action): State {
         }
         break;
       case 'SELECT_PREVIOUS_ELEMENT_WITH_ERROR_OR_WARNING_IN_TREE': {
-        if (store.errorCount === 0 && store.warningCount === 0) {
+        const elementIndicesWithErrorsOrWarnings = store.getElementsWithErrorsAndWarnings();
+        if (elementIndicesWithErrorsOrWarnings.length === 0) {
           return state;
         }
-
-        const elementIndicesWithErrorsOrWarnings = store.getElementsWithErrorsAndWarnings();
 
         let flatIndex = 0;
         if (selectedElementIndex !== null) {
@@ -419,11 +418,10 @@ function reduceTreeState(store: Store, state: State, action: Action): State {
         break;
       }
       case 'SELECT_NEXT_ELEMENT_WITH_ERROR_OR_WARNING_IN_TREE': {
-        if (store.errorCount === 0 && store.warningCount === 0) {
+        const elementIndicesWithErrorsOrWarnings = store.getElementsWithErrorsAndWarnings();
+        if (elementIndicesWithErrorsOrWarnings.length === 0) {
           return state;
         }
-
-        const elementIndicesWithErrorsOrWarnings = store.getElementsWithErrorsAndWarnings();
 
         let flatIndex = -1;
         if (selectedElementIndex !== null) {
@@ -829,7 +827,7 @@ type Props = {|
   defaultSelectedElementIndex?: ?number,
 |};
 
-// TODO Remove TreeContextController wrapper element once global ConsearchText.write API exists.
+// TODO Remove TreeContextController wrapper element once global Context.write API exists.
 function TreeContextController({
   children,
   defaultInspectedElementID,

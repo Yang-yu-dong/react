@@ -10,6 +10,8 @@
 import type {ReactNodeList} from 'shared/ReactTypes';
 import type {Writable} from 'stream';
 
+import ReactVersion from 'shared/ReactVersion';
+
 import {
   createRequest,
   startWork,
@@ -23,54 +25,93 @@ import {
 } from './ReactDOMServerFormatConfig';
 
 function createDrainHandler(destination, request) {
-  return () => startFlowing(request);
+  return () => startFlowing(request, destination);
 }
 
-type Options = {
+function createAbortHandler(request, reason) {
+  return () => abort(request, reason);
+}
+
+type Options = {|
   identifierPrefix?: string,
   namespaceURI?: string,
+  nonce?: string,
+  bootstrapScriptContent?: string,
+  bootstrapScripts?: Array<string>,
+  bootstrapModules?: Array<string>,
   progressiveChunkSize?: number,
-  onReadyToStream?: () => void,
-  onCompleteAll?: () => void,
-  onError?: (error: mixed) => void,
-};
+  onShellReady?: () => void,
+  onShellError?: (error: mixed) => void,
+  onAllReady?: () => void,
+  onError?: (error: mixed) => ?string,
+|};
 
-type Controls = {
+type PipeableStream = {|
   // Cancel any pending I/O and put anything remaining into
   // client rendered mode.
   abort(): void,
-};
+  pipe<T: Writable>(destination: T): T,
+|};
 
-function pipeToNodeWritable(
-  children: ReactNodeList,
-  destination: Writable,
-  options?: Options,
-): Controls {
-  const request = createRequest(
+function createRequestImpl(children: ReactNodeList, options: void | Options) {
+  return createRequest(
     children,
-    destination,
-    createResponseState(options ? options.identifierPrefix : undefined),
+    createResponseState(
+      options ? options.identifierPrefix : undefined,
+      options ? options.nonce : undefined,
+      options ? options.bootstrapScriptContent : undefined,
+      options ? options.bootstrapScripts : undefined,
+      options ? options.bootstrapModules : undefined,
+    ),
     createRootFormatContext(options ? options.namespaceURI : undefined),
     options ? options.progressiveChunkSize : undefined,
     options ? options.onError : undefined,
-    options ? options.onCompleteAll : undefined,
-    options ? options.onReadyToStream : undefined,
+    options ? options.onAllReady : undefined,
+    options ? options.onShellReady : undefined,
+    options ? options.onShellError : undefined,
+    undefined,
   );
+}
+
+function renderToPipeableStream(
+  children: ReactNodeList,
+  options?: Options,
+): PipeableStream {
+  const request = createRequestImpl(children, options);
   let hasStartedFlowing = false;
   startWork(request);
   return {
-    startWriting() {
+    pipe<T: Writable>(destination: T): T {
       if (hasStartedFlowing) {
-        return;
+        throw new Error(
+          'React currently only supports piping to one writable stream.',
+        );
       }
       hasStartedFlowing = true;
-      startFlowing(request);
+      startFlowing(request, destination);
       destination.on('drain', createDrainHandler(destination, request));
+      destination.on(
+        'error',
+        createAbortHandler(
+          request,
+          // eslint-disable-next-line react-internal/prod-error-codes
+          new Error('The destination stream errored while writing data.'),
+        ),
+      );
+      destination.on(
+        'close',
+        createAbortHandler(
+          request,
+          // eslint-disable-next-line react-internal/prod-error-codes
+          new Error('The destination stream closed early.'),
+        ),
+      );
+      return destination;
     },
-    abort() {
-      abort(request);
+    abort(reason) {
+      abort(request, reason);
     },
   };
 }
 
-export {pipeToNodeWritable};
+export {renderToPipeableStream, ReactVersion as version};

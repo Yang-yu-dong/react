@@ -11,16 +11,15 @@
 
 describe('ReactStrictMode', () => {
   let React;
-  let ReactDOM;
+  let ReactDOMClient;
   let act;
 
   beforeEach(() => {
     jest.resetModules();
     React = require('react');
-    ReactDOM = require('react-dom');
+    ReactDOMClient = require('react-dom/client');
 
-    const TestUtils = require('react-dom/test-utils');
-    act = TestUtils.unstable_concurrentAct;
+    act = require('jest-react').act;
 
     const ReactFeatureFlags = require('shared/ReactFeatureFlags');
     ReactFeatureFlags.enableStrictEffects = __DEV__;
@@ -49,11 +48,10 @@ describe('ReactStrictMode', () => {
       return null;
     }
 
-    // @gate experimental
     it('should default to not strict', () => {
       act(() => {
         const container = document.createElement('div');
-        const root = ReactDOM.createRoot(container);
+        const root = ReactDOMClient.createRoot(container);
         root.render(<Component label="A" />);
       });
 
@@ -65,11 +63,10 @@ describe('ReactStrictMode', () => {
     });
 
     if (__DEV__) {
-      // @gate experimental
       it('should support enabling strict mode via createRoot option', () => {
         act(() => {
           const container = document.createElement('div');
-          const root = ReactDOM.createRoot(container, {
+          const root = ReactDOMClient.createRoot(container, {
             unstable_strictMode: true,
           });
           root.render(<Component label="A" />);
@@ -87,11 +84,10 @@ describe('ReactStrictMode', () => {
         ]);
       });
 
-      // @gate experimental
       it('should include legacy + strict effects mode', () => {
         act(() => {
           const container = document.createElement('div');
-          const root = ReactDOM.createRoot(container);
+          const root = ReactDOMClient.createRoot(container);
           root.render(
             <React.StrictMode>
               <Component label="A" />
@@ -111,11 +107,10 @@ describe('ReactStrictMode', () => {
         ]);
       });
 
-      // @gate experimental
       it('should allow level to be increased with nesting', () => {
         act(() => {
           const container = document.createElement('div');
-          const root = ReactDOM.createRoot(container);
+          const root = ReactDOMClient.createRoot(container);
           root.render(
             <>
               <Component label="A" />

@@ -17,8 +17,6 @@ export type Destination = {
 export type PrecomputedChunk = string;
 export type Chunk = string;
 
-export const isPrimaryStreamConfig = true;
-
 export function scheduleWork(callback: () => void) {
   // We don't schedule work in this model, and instead expect performWork to always be called repeatedly.
 }
@@ -28,6 +26,13 @@ export function flushBuffered(destination: Destination) {}
 export function beginWriting(destination: Destination) {}
 
 export function writeChunk(
+  destination: Destination,
+  chunk: Chunk | PrecomputedChunk,
+): void {
+  destination.buffer += chunk;
+}
+
+export function writeChunkAndReturn(
   destination: Destination,
   chunk: Chunk | PrecomputedChunk,
 ): boolean {

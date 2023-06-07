@@ -13,9 +13,11 @@ const ReactDOMServerIntegrationUtils = require('./utils/ReactDOMServerIntegratio
 
 let React;
 let ReactDOM;
+let ReactDOMClient;
 let ReactDOMServer;
 let ReactTestUtils;
 let act;
+let SuspenseList;
 
 function initModules() {
   // Reset warning cache.
@@ -23,9 +25,13 @@ function initModules() {
 
   React = require('react');
   ReactDOM = require('react-dom');
+  ReactDOMClient = require('react-dom/client');
   ReactDOMServer = require('react-dom/server');
   ReactTestUtils = require('react-dom/test-utils');
-  act = ReactTestUtils.unstable_concurrentAct;
+  act = require('jest-react').act;
+  if (gate(flags => flags.enableSuspenseList)) {
+    SuspenseList = React.SuspenseList;
+  }
 
   // Make them available to the helpers.
   return {
@@ -93,7 +99,6 @@ describe('ReactDOMServerSuspense', () => {
       : children;
   }
 
-  // @gate experimental || www
   it('should render the children when no promise is thrown', async () => {
     const c = await serverRender(
       <div>
@@ -105,7 +110,6 @@ describe('ReactDOMServerSuspense', () => {
     expect(getVisibleChildren(c)).toEqual(<div>Children</div>);
   });
 
-  // @gate experimental || www
   it('should render the fallback when a promise thrown', async () => {
     const c = await serverRender(
       <div>
@@ -117,7 +121,6 @@ describe('ReactDOMServerSuspense', () => {
     expect(getVisibleChildren(c)).toEqual(<div>Fallback</div>);
   });
 
-  // @gate experimental || www
   it('should work with nested suspense components', async () => {
     const c = await serverRender(
       <div>
@@ -140,17 +143,17 @@ describe('ReactDOMServerSuspense', () => {
     );
   });
 
-  // @gate experimental
+  // @gate enableSuspenseList
   it('server renders a SuspenseList component and its children', async () => {
     const example = (
-      <React.SuspenseList>
+      <SuspenseList>
         <React.Suspense fallback="Loading A">
           <div>A</div>
         </React.Suspense>
         <React.Suspense fallback="Loading B">
           <div>B</div>
         </React.Suspense>
-      </React.SuspenseList>
+      </SuspenseList>
     );
     const element = await serverRender(example);
     const parent = element.parentNode;
@@ -162,8 +165,7 @@ describe('ReactDOMServerSuspense', () => {
     expect(divB.textContent).toBe('B');
 
     act(() => {
-      const root = ReactDOM.createRoot(parent, {hydrate: true});
-      root.render(example);
+      ReactDOMClient.hydrateRoot(parent, example);
     });
 
     const parent2 = element.parentNode;
@@ -187,7 +189,7 @@ describe('ReactDOMServerSuspense', () => {
           1,
         );
       },
-      'Add a <Suspense fallback=...> component higher in the tree',
+      'A component suspended while responding to synchronous input.',
     );
 
     itThrowsWhenRendering(
@@ -200,7 +202,7 @@ describe('ReactDOMServerSuspense', () => {
           1,
         );
       },
-      'Add a <Suspense fallback=...> component higher in the tree',
+      'A component suspended while responding to synchronous input.',
     );
   }
 

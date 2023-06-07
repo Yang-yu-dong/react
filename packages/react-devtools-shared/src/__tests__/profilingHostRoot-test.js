@@ -9,12 +9,12 @@
 
 describe('profiling HostRoot', () => {
   let React;
-  let ReactDOM;
+  let ReactDOMClient;
   let Scheduler;
+  let legacyRender;
   let store: Store;
   let utils;
   let getEffectDurations;
-
   let effectDurations;
   let passiveEffectDurations;
 
@@ -22,12 +22,14 @@ describe('profiling HostRoot', () => {
     utils = require('./utils');
     utils.beforeEachProfiling();
 
+    legacyRender = utils.legacyRender;
+
     getEffectDurations = require('../backend/utils').getEffectDurations;
 
     store = global.store;
 
     React = require('react');
-    ReactDOM = require('react-dom');
+    ReactDOMClient = require('react-dom/client');
     Scheduler = require('scheduler');
 
     effectDurations = [];
@@ -47,6 +49,7 @@ describe('profiling HostRoot', () => {
     };
   });
 
+  // @reactVersion >=18.0
   it('should expose passive and layout effect durations for render()', () => {
     function App() {
       React.useEffect(() => {
@@ -61,7 +64,7 @@ describe('profiling HostRoot', () => {
     utils.act(() => store.profilerStore.startProfiling());
     utils.act(() => {
       const container = document.createElement('div');
-      ReactDOM.render(<App />, container);
+      legacyRender(<App />, container);
     });
     utils.act(() => store.profilerStore.stopProfiling());
 
@@ -75,6 +78,7 @@ describe('profiling HostRoot', () => {
     );
   });
 
+  // @reactVersion >=18.0
   it('should expose passive and layout effect durations for createRoot()', () => {
     function App() {
       React.useEffect(() => {
@@ -89,7 +93,7 @@ describe('profiling HostRoot', () => {
     utils.act(() => store.profilerStore.startProfiling());
     utils.act(() => {
       const container = document.createElement('div');
-      const root = ReactDOM.unstable_createRoot(container);
+      const root = ReactDOMClient.createRoot(container);
       root.render(<App />);
     });
     utils.act(() => store.profilerStore.stopProfiling());
@@ -104,6 +108,7 @@ describe('profiling HostRoot', () => {
     );
   });
 
+  // @reactVersion >=18.0
   it('should properly reset passive and layout effect durations between commits', () => {
     function App({shouldCascade}) {
       const [, setState] = React.useState(false);
@@ -122,7 +127,7 @@ describe('profiling HostRoot', () => {
     }
 
     const container = document.createElement('div');
-    const root = ReactDOM.unstable_createRoot(container);
+    const root = ReactDOMClient.createRoot(container);
 
     utils.act(() => store.profilerStore.startProfiling());
     utils.act(() => root.render(<App />));

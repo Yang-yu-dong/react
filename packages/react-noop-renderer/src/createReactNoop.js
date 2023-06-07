@@ -14,24 +14,24 @@
  * environment.
  */
 
-import type {Fiber} from 'react-reconciler/src/ReactInternalTypes';
-import type {UpdateQueue} from 'react-reconciler/src/ReactUpdateQueue';
-import type {ReactNodeList, Thenable} from 'shared/ReactTypes';
+import type {
+  Fiber,
+  TransitionTracingCallbacks,
+} from 'react-reconciler/src/ReactInternalTypes';
+import type {UpdateQueue} from 'react-reconciler/src/ReactFiberClassUpdateQueue.new';
+import type {ReactNodeList} from 'shared/ReactTypes';
 import type {RootTag} from 'react-reconciler/src/ReactRootTags';
 
 import * as Scheduler from 'scheduler/unstable_mock';
 import {REACT_FRAGMENT_TYPE, REACT_ELEMENT_TYPE} from 'shared/ReactSymbols';
 import isArray from 'shared/isArray';
+import {checkPropStringCoercion} from 'shared/CheckStringCoercion';
 import {
   DefaultEventPriority,
   IdleEventPriority,
   ConcurrentRoot,
   LegacyRoot,
 } from 'react-reconciler/constants';
-
-import ReactSharedInternals from 'shared/ReactSharedInternals';
-import enqueueTask from 'shared/enqueueTask';
-const {IsSomeRendererActing} = ReactSharedInternals;
 
 type Container = {
   rootID: string,
@@ -52,6 +52,7 @@ type Props = {
 type Instance = {|
   type: string,
   id: number,
+  parent: number,
   children: Array<Instance | TextInstance>,
   text: string | null,
   prop: any,
@@ -61,10 +62,15 @@ type Instance = {|
 type TextInstance = {|
   text: string,
   id: number,
+  parent: number,
   hidden: boolean,
   context: HostContext,
 |};
 type HostContext = Object;
+type CreateRootOptions = {
+  transitionCallbacks?: TransitionTracingCallbacks,
+  ...
+};
 
 const NO_CONTEXT = {};
 const UPPERCASE_CONTEXT = {};
@@ -84,6 +90,11 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
     parentInstance: Container | Instance,
     child: Instance | TextInstance,
   ): void {
+    const prevParent = child.parent;
+    if (prevParent !== -1 && prevParent !== parentInstance.id) {
+      throw new Error('Reparenting is not allowed');
+    }
+    child.parent = parentInstance.id;
     const index = parentInstance.children.indexOf(child);
     if (index !== -1) {
       parentInstance.children.splice(index, 1);
@@ -212,9 +223,13 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
     keepChildren: boolean,
     recyclableInstance: null | Instance,
   ): Instance {
+    if (__DEV__) {
+      checkPropStringCoercion(newProps.children, 'children');
+    }
     const clone = {
       id: instance.id,
       type: type,
+      parent: instance.parent,
       children: keepChildren ? instance.children : [],
       text: shouldSetTextContent(type, newProps)
         ? computeText((newProps.children: any) + '', instance.context)
@@ -225,6 +240,10 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
     };
     Object.defineProperty(clone, 'id', {
       value: clone.id,
+      enumerable: false,
+    });
+    Object.defineProperty(clone, 'parent', {
+      value: clone.parent,
       enumerable: false,
     });
     Object.defineProperty(clone, 'text', {
@@ -262,6 +281,9 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       type: string,
       rootcontainerInstance: Container,
     ) {
+      if (type === 'offscreen') {
+        return parentHostContext;
+      }
       if (type === 'uppercase') {
         return UPPERCASE_CONTEXT;
       }
@@ -282,12 +304,21 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       if (type === 'errorInCompletePhase') {
         throw new Error('Error in host config.');
       }
+      if (__DEV__) {
+        // The `if` statement here prevents auto-disabling of the safe coercion
+        // ESLint rule, so we must manually disable it below.
+        if (shouldSetTextContent(type, props)) {
+          checkPropStringCoercion(props.children, 'children');
+        }
+      }
       const inst = {
         id: instanceCounter++,
         type: type,
         children: [],
+        parent: -1,
         text: shouldSetTextContent(type, props)
-          ? computeText((props.children: any) + '', hostContext)
+          ? // eslint-disable-next-line react-internal/safe-string-coercion
+            computeText((props.children: any) + '', hostContext)
           : null,
         prop: props.prop,
         hidden: !!props.hidden,
@@ -295,6 +326,10 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       };
       // Hide from unit tests
       Object.defineProperty(inst, 'id', {value: inst.id, enumerable: false});
+      Object.defineProperty(inst, 'parent', {
+        value: inst.parent,
+        enumerable: false,
+      });
       Object.defineProperty(inst, 'text', {
         value: inst.text,
         enumerable: false,
@@ -314,6 +349,11 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       parentInstance: Instance,
       child: Instance | TextInstance,
     ): void {
+      const prevParent = child.parent;
+      if (prevParent !== -1 && prevParent !== parentInstance.id) {
+        throw new Error('Reparenting is not allowed');
+      }
+      child.parent = parentInstance.id;
       parentInstance.children.push(child);
     },
 
@@ -358,11 +398,16 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       const inst = {
         text: text,
         id: instanceCounter++,
+        parent: -1,
         hidden: false,
         context: hostContext,
       };
       // Hide from unit tests
       Object.defineProperty(inst, 'id', {value: inst.id, enumerable: false});
+      Object.defineProperty(inst, 'parent', {
+        value: inst.parent,
+        enumerable: false,
+      });
       Object.defineProperty(inst, 'context', {
         value: inst.context,
         enumerable: false,
@@ -428,6 +473,10 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
     },
 
     detachDeletedInstance() {},
+
+    logRecoverableError() {
+      // no-op
+    },
   };
 
   const hostConfig = useMutation
@@ -455,6 +504,9 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
           instance.prop = newProps.prop;
           instance.hidden = !!newProps.hidden;
           if (shouldSetTextContent(type, newProps)) {
+            if (__DEV__) {
+              checkPropStringCoercion(newProps.children, 'children');
+            }
             instance.text = computeText(
               (newProps.children: any) + '',
               instance.context,
@@ -570,13 +622,18 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
         ): TextInstance {
           const clone = {
             text: instance.text,
-            id: instanceCounter++,
+            id: instance.id,
+            parent: instance.parent,
             hidden: true,
             context: instance.context,
           };
           // Hide from unit tests
           Object.defineProperty(clone, 'id', {
             value: clone.id,
+            enumerable: false,
+          });
+          Object.defineProperty(clone, 'parent', {
+            value: clone.parent,
             enumerable: false,
           });
           Object.defineProperty(clone, 'context', {
@@ -658,7 +715,7 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
 
   function getPendingChildren(root) {
     if (root) {
-      return root.pendingChildren;
+      return root.children;
     } else {
       return null;
     }
@@ -702,6 +759,25 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
     return children;
   }
 
+  function flushSync<R>(fn: () => R): R {
+    if (__DEV__) {
+      if (NoopRenderer.isAlreadyRendering()) {
+        console.error(
+          'flushSync was called from inside a lifecycle method. React cannot ' +
+            'flush when React is already rendering. Consider moving this call to ' +
+            'a scheduler task or micro task.',
+        );
+      }
+    }
+    return NoopRenderer.flushSync(fn);
+  }
+
+  function onRecoverableError(error) {
+    // TODO: Turn this on once tests are fixed
+    // eslint-disable-next-line react-internal/no-production-logging, react-internal/warning-args
+    // console.error(error);
+  }
+
   let idCounter = 0;
 
   const ReactNoop = {
@@ -722,14 +798,22 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       if (!root) {
         const container = {rootID: rootID, pendingChildren: [], children: []};
         rootContainers.set(rootID, container);
-        root = NoopRenderer.createContainer(container, tag, false, null, null);
+        root = NoopRenderer.createContainer(
+          container,
+          tag,
+          null,
+          null,
+          false,
+          '',
+          onRecoverableError,
+        );
         roots.set(rootID, root);
       }
       return root.current.stateNode.containerInfo;
     },
 
     // TODO: Replace ReactNoop.render with createRoot + root.render
-    createRoot() {
+    createRoot(options?: CreateRootOptions) {
       const container = {
         rootID: '' + idCounter++,
         pendingChildren: [],
@@ -738,9 +822,14 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       const fiberRoot = NoopRenderer.createContainer(
         container,
         ConcurrentRoot,
+        null,
+        null,
         false,
-        null,
-        null,
+        '',
+        onRecoverableError,
+        options && options.transitionCallbacks
+          ? options.transitionCallbacks
+          : null,
       );
       return {
         _Scheduler: Scheduler,
@@ -765,9 +854,11 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       const fiberRoot = NoopRenderer.createContainer(
         container,
         LegacyRoot,
+        null,
+        null,
         false,
-        null,
-        null,
+        '',
+        onRecoverableError,
       );
       return {
         _Scheduler: Scheduler,
@@ -905,8 +996,6 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
 
     deferredUpdates: NoopRenderer.deferredUpdates,
 
-    unbatchedUpdates: NoopRenderer.unbatchedUpdates,
-
     discreteUpdates: NoopRenderer.discreteUpdates,
 
     idleUpdates<T>(fn: () => T): T {
@@ -919,15 +1008,8 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       }
     },
 
-    flushDiscreteUpdates: NoopRenderer.flushDiscreteUpdates,
-
-    flushSync(fn: () => mixed) {
-      NoopRenderer.flushSync(fn);
-    },
-
+    flushSync,
     flushPassiveEffects: NoopRenderer.flushPassiveEffects,
-
-    act: noopAct,
 
     // Logs the current state of the tree.
     dumpTree(rootID: string = DEFAULT_ROOT_ID) {
@@ -1041,121 +1123,6 @@ function createReactNoop(reconciler: Function, useMutation: boolean) {
       return roots.get(rootID);
     },
   };
-
-  // This version of `act` is only used by our tests. Unlike the public version
-  // of `act`, it's designed to work identically in both production and
-  // development. It may have slightly different behavior from the public
-  // version, too, since our constraints in our test suite are not the same as
-  // those of developers using React — we're testing React itself, as opposed to
-  // building an app with React.
-
-  const {batchedUpdates, IsThisRendererActing} = NoopRenderer;
-  let actingUpdatesScopeDepth = 0;
-
-  function noopAct(scope: () => Thenable<mixed> | void) {
-    if (Scheduler.unstable_flushAllWithoutAsserting === undefined) {
-      throw Error(
-        'This version of `act` requires a special mock build of Scheduler.',
-      );
-    }
-    if (setTimeout._isMockFunction !== true) {
-      throw Error(
-        "This version of `act` requires Jest's timer mocks " +
-          '(i.e. jest.useFakeTimers).',
-      );
-    }
-
-    const previousActingUpdatesScopeDepth = actingUpdatesScopeDepth;
-    const previousIsSomeRendererActing = IsSomeRendererActing.current;
-    const previousIsThisRendererActing = IsThisRendererActing.current;
-    IsSomeRendererActing.current = true;
-    IsThisRendererActing.current = true;
-    actingUpdatesScopeDepth++;
-
-    const unwind = () => {
-      actingUpdatesScopeDepth--;
-      IsSomeRendererActing.current = previousIsSomeRendererActing;
-      IsThisRendererActing.current = previousIsThisRendererActing;
-
-      if (__DEV__) {
-        if (actingUpdatesScopeDepth > previousActingUpdatesScopeDepth) {
-          // if it's _less than_ previousActingUpdatesScopeDepth, then we can
-          // assume the 'other' one has warned
-          console.error(
-            'You seem to have overlapping act() calls, this is not supported. ' +
-              'Be sure to await previous act() calls before making a new one. ',
-          );
-        }
-      }
-    };
-
-    // TODO: This would be way simpler if 1) we required a promise to be
-    // returned and 2) we could use async/await. Since it's only our used in
-    // our test suite, we should be able to.
-    try {
-      const thenable = batchedUpdates(scope);
-      if (
-        typeof thenable === 'object' &&
-        thenable !== null &&
-        typeof thenable.then === 'function'
-      ) {
-        return {
-          then(resolve: () => void, reject: (error: mixed) => void) {
-            thenable.then(
-              () => {
-                flushActWork(
-                  () => {
-                    unwind();
-                    resolve();
-                  },
-                  error => {
-                    unwind();
-                    reject(error);
-                  },
-                );
-              },
-              error => {
-                unwind();
-                reject(error);
-              },
-            );
-          },
-        };
-      } else {
-        try {
-          // TODO: Let's not support non-async scopes at all in our tests. Need to
-          // migrate existing tests.
-          let didFlushWork;
-          do {
-            didFlushWork = Scheduler.unstable_flushAllWithoutAsserting();
-          } while (didFlushWork);
-        } finally {
-          unwind();
-        }
-      }
-    } catch (error) {
-      unwind();
-      throw error;
-    }
-  }
-
-  function flushActWork(resolve, reject) {
-    // Flush suspended fallbacks
-    // $FlowFixMe: Flow doesn't know about global Jest object
-    jest.runOnlyPendingTimers();
-    enqueueTask(() => {
-      try {
-        const didFlushWork = Scheduler.unstable_flushAllWithoutAsserting();
-        if (didFlushWork) {
-          flushActWork(resolve, reject);
-        } else {
-          resolve();
-        }
-      } catch (error) {
-        reject(error);
-      }
-    });
-  }
 
   return ReactNoop;
 }

@@ -7,14 +7,16 @@
  * @flow
  */
 
-import type {ReactContext} from 'shared/ReactTypes';
+import type {ReactContext, Wakeable} from 'shared/ReactTypes';
 import type {Source} from 'shared/ReactElementType';
 import type {Fiber} from 'react-reconciler/src/ReactInternalTypes';
 import type {
   ComponentFilter,
   ElementType,
+  Plugins,
 } from 'react-devtools-shared/src/types';
 import type {ResolveNativeStyle} from 'react-devtools-shared/src/backend/NativeStyleEditor/setupNativeStyleEditor';
+import type {TimelineDataExport} from 'react-devtools-timeline/src/types';
 
 type BundleType =
   | 0 // PROD
@@ -51,6 +53,7 @@ export type WorkTagMap = {|
   SimpleMemoComponent: WorkTag,
   SuspenseComponent: WorkTag,
   SuspenseListComponent: WorkTag,
+  TracingMarkerComponent: WorkTag,
   YieldComponent: WorkTag,
 |};
 
@@ -86,8 +89,11 @@ export type ReactProviderType<T> = {
   ...
 };
 
+export type Lane = number;
+export type Lanes = number;
+
 export type ReactRenderer = {
-  findFiberByHostInstance: (hostInstance: NativeType) => ?Fiber,
+  findFiberByHostInstance: (hostInstance: NativeType) => Fiber | null,
   version: string,
   rendererPackageName: string,
   bundleType: BundleType,
@@ -142,6 +148,13 @@ export type ReactRenderer = {
   ComponentTree?: any,
   // Present for React DOM v12 (possibly earlier) through v15.
   Mount?: any,
+  // Only injected by React v17.0.3+ in DEV mode
+  setErrorHandler?: ?(shouldError: (fiber: Object) => ?boolean) => void,
+  // Intentionally opaque type to avoid coupling DevTools to different Fast Refresh versions.
+  scheduleRefresh?: Function,
+  // 18.0+
+  injectProfilingHooks?: (profilingHooks: DevToolsProfilingHooks) => void,
+  getLaneLabelMap?: () => Map<Lane, string> | null,
   ...
 };
 
@@ -184,6 +197,7 @@ export type ProfilingDataForRootBackend = {|
 export type ProfilingDataBackend = {|
   dataForRoots: Array<ProfilingDataForRootBackend>,
   rendererID: number,
+  timelineData: TimelineDataExport | null,
 |};
 
 export type PathFrame = {|
@@ -224,6 +238,11 @@ export type InspectedElement = {|
   canEditFunctionPropsDeletePaths: boolean,
   canEditFunctionPropsRenamePaths: boolean,
 
+  // Is this Error, and can its value be overridden now?
+  canToggleError: boolean,
+  isErrored: boolean,
+  targetErrorBoundaryID: ?number,
+
   // Is this Suspense, and can its value be overridden now?
   canToggleSuspense: boolean,
 
@@ -256,11 +275,24 @@ export type InspectedElement = {|
   // Meta information about the renderer that created this element.
   rendererPackageName: string | null,
   rendererVersion: string | null,
+
+  // UI plugins/visualizations for the inspected element.
+  plugins: Plugins,
 |};
 
+export const InspectElementErrorType = 'error';
 export const InspectElementFullDataType = 'full-data';
 export const InspectElementNoChangeType = 'no-change';
 export const InspectElementNotFoundType = 'not-found';
+
+export type InspectElementError = {|
+  id: number,
+  responseID: number,
+  type: 'error',
+  errorType: 'user' | 'unknown-hook' | 'uncaught',
+  message: string,
+  stack?: string,
+|};
 
 export type InspectElementFullData = {|
   id: number,
@@ -290,6 +322,7 @@ export type InspectElementNotFound = {|
 |};
 
 export type InspectedElementPayload =
+  | InspectElementError
   | InspectElementFullData
   | InspectElementHydratedPath
   | InspectElementNoChange
@@ -317,6 +350,7 @@ export type RendererInterface = {
   findNativeNodesForFiberID: FindNativeNodesForFiberID,
   flushInitialOperations: () => void,
   getBestMatchForTrackedPath: () => PathMatch | null,
+  getFiberForNative: (component: NativeType) => Fiber | null,
   getFiberIDForNative: GetFiberIDForNative,
   getDisplayNameForFiberID: GetDisplayNameForFiberID,
   getInstanceAndStyle(id: number): InstanceAndStyle,
@@ -330,8 +364,10 @@ export type RendererInterface = {
     requestID: number,
     id: number,
     inspectedPaths: Object,
+    forceFullData: boolean,
   ) => InspectedElementPayload,
   logElementToConsole: (id: number) => void,
+  overrideError: (id: number, forceError: boolean) => void,
   overrideSuspense: (id: number, forceFallback: boolean) => void,
   overrideValueAtPath: (
     type: Type,
@@ -340,6 +376,7 @@ export type RendererInterface = {
     path: Array<string | number>,
     value: any,
   ) => void,
+  patchConsoleForStrictMode: () => void,
   prepareViewAttributeSource: (
     id: number,
     path: Array<string | number>,
@@ -362,11 +399,57 @@ export type RendererInterface = {
     path: Array<string | number>,
     count: number,
   ) => void,
+  unpatchConsoleForStrictMode: () => void,
   updateComponentFilters: (componentFilters: Array<ComponentFilter>) => void,
+
+  // Timeline profiler interface
+
   ...
 };
 
 export type Handler = (data: any) => void;
+
+// Renderers use these APIs to report profiling data to DevTools at runtime.
+// They get passed from the DevTools backend to the reconciler during injection.
+export type DevToolsProfilingHooks = {|
+  // Scheduling methods:
+  markRenderScheduled: (lane: Lane) => void,
+  markStateUpdateScheduled: (fiber: Fiber, lane: Lane) => void,
+  markForceUpdateScheduled: (fiber: Fiber, lane: Lane) => void,
+
+  // Work loop level methods:
+  markRenderStarted: (lanes: Lanes) => void,
+  markRenderYielded: () => void,
+  markRenderStopped: () => void,
+  markCommitStarted: (lanes: Lanes) => void,
+  markCommitStopped: () => void,
+  markLayoutEffectsStarted: (lanes: Lanes) => void,
+  markLayoutEffectsStopped: () => void,
+  markPassiveEffectsStarted: (lanes: Lanes) => void,
+  markPassiveEffectsStopped: () => void,
+
+  // Fiber level methods:
+  markComponentRenderStarted: (fiber: Fiber) => void,
+  markComponentRenderStopped: () => void,
+  markComponentErrored: (
+    fiber: Fiber,
+    thrownValue: mixed,
+    lanes: Lanes,
+  ) => void,
+  markComponentSuspended: (
+    fiber: Fiber,
+    wakeable: Wakeable,
+    lanes: Lanes,
+  ) => void,
+  markComponentLayoutEffectMountStarted: (fiber: Fiber) => void,
+  markComponentLayoutEffectMountStopped: () => void,
+  markComponentLayoutEffectUnmountStarted: (fiber: Fiber) => void,
+  markComponentLayoutEffectUnmountStopped: () => void,
+  markComponentPassiveEffectMountStarted: (fiber: Fiber) => void,
+  markComponentPassiveEffectMountStopped: () => void,
+  markComponentPassiveEffectUnmountStarted: (fiber: Fiber) => void,
+  markComponentPassiveEffectUnmountStopped: () => void,
+|};
 
 export type DevToolsHook = {
   listeners: {[key: string]: Array<Handler>, ...},
@@ -396,5 +479,14 @@ export type DevToolsHook = {
     // Added in v16.9 to support Fast Refresh
     didError?: boolean,
   ) => void,
+
+  // Timeline internal module filtering
+  getInternalModuleRanges: () => Array<[string, string]>,
+  registerInternalModuleStart: (moduleStartError: Error) => void,
+  registerInternalModuleStop: (moduleStopError: Error) => void,
+
+  // Testing
+  dangerous_setTargetConsoleForTesting?: (fakeConsole: Object) => void,
+
   ...
 };

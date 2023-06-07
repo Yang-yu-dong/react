@@ -12,6 +12,7 @@
 describe('SimpleEventPlugin', function() {
   let React;
   let ReactDOM;
+  let ReactDOMClient;
   let Scheduler;
   let act;
 
@@ -39,6 +40,7 @@ describe('SimpleEventPlugin', function() {
     jest.resetModules();
     React = require('react');
     ReactDOM = require('react-dom');
+    ReactDOMClient = require('react-dom/client');
     Scheduler = require('scheduler');
 
     onClick = jest.fn();
@@ -235,15 +237,15 @@ describe('SimpleEventPlugin', function() {
 
       React = require('react');
       ReactDOM = require('react-dom');
+      ReactDOMClient = require('react-dom/client');
       Scheduler = require('scheduler');
 
-      act = require('react-dom/test-utils').unstable_concurrentAct;
+      act = require('jest-react').act;
     });
 
-    // @gate experimental
     it('flushes pending interactive work before exiting event handler', async () => {
       container = document.createElement('div');
-      const root = ReactDOM.unstable_createRoot(container);
+      const root = ReactDOMClient.createRoot(container);
       document.body.appendChild(container);
 
       let button;
@@ -316,10 +318,9 @@ describe('SimpleEventPlugin', function() {
     // NOTE: This test was written for the old behavior of discrete updates,
     // where they would be async, but flushed early if another discrete update
     // was dispatched.
-    // @gate experimental
     it('end result of many interactive updates is deterministic', async () => {
       container = document.createElement('div');
-      const root = ReactDOM.unstable_createRoot(container);
+      const root = ReactDOMClient.createRoot(container);
       document.body.appendChild(container);
 
       let button;

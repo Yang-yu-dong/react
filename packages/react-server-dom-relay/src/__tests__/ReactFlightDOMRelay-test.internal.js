@@ -9,25 +9,29 @@
 
 let act;
 let React;
-let ReactDOM;
-let JSResourceReference;
+let ReactDOMClient;
+let JSResourceReferenceImpl;
 let ReactDOMFlightRelayServer;
 let ReactDOMFlightRelayClient;
+let SuspenseList;
 
 describe('ReactFlightDOMRelay', () => {
   beforeEach(() => {
     jest.resetModules();
 
-    act = require('react-dom/test-utils').unstable_concurrentAct;
+    act = require('jest-react').act;
     React = require('react');
-    ReactDOM = require('react-dom');
+    ReactDOMClient = require('react-dom/client');
     ReactDOMFlightRelayServer = require('react-server-dom-relay/server');
     ReactDOMFlightRelayClient = require('react-server-dom-relay');
-    JSResourceReference = require('JSResourceReference');
+    JSResourceReferenceImpl = require('JSResourceReferenceImpl');
+    if (gate(flags => flags.enableSuspenseList)) {
+      SuspenseList = React.SuspenseList;
+    }
   });
 
   function readThrough(data) {
-    const response = ReactDOMFlightRelayClient.createResponse();
+    const response = ReactDOMFlightRelayClient.createResponse(null);
     for (let i = 0; i < data.length; i++) {
       const chunk = data[i];
       ReactDOMFlightRelayClient.resolveRow(response, chunk);
@@ -72,7 +76,6 @@ describe('ReactFlightDOMRelay', () => {
     });
   });
 
-  // @gate experimental
   it('can render a client component using a module reference and render there', () => {
     function UserClient(props) {
       return (
@@ -81,7 +84,7 @@ describe('ReactFlightDOMRelay', () => {
         </span>
       );
     }
-    const User = new JSResourceReference(UserClient);
+    const User = new JSResourceReferenceImpl(UserClient);
 
     function Greeting({firstName, lastName}) {
       return <User greeting="Hello" name={firstName + ' ' + lastName} />;
@@ -97,7 +100,7 @@ describe('ReactFlightDOMRelay', () => {
     const modelClient = readThrough(transport);
 
     const container = document.createElement('div');
-    const root = ReactDOM.createRoot(container);
+    const root = ReactDOMClient.createRoot(container);
     act(() => {
       root.render(modelClient.greeting);
     });
@@ -105,17 +108,9 @@ describe('ReactFlightDOMRelay', () => {
     expect(container.innerHTML).toEqual('<span>Hello, Seb Smith</span>');
   });
 
-  // @gate experimental
+  // @gate enableSuspenseList
   it('can reasonably handle different element types', () => {
-    const {
-      forwardRef,
-      memo,
-      Fragment,
-      StrictMode,
-      Profiler,
-      Suspense,
-      SuspenseList,
-    } = React;
+    const {forwardRef, memo, Fragment, StrictMode, Profiler, Suspense} = React;
 
     const Inner = memo(
       forwardRef((props, ref) => {
